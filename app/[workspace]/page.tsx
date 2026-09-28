@@ -109,30 +109,66 @@ export default function WorkspaceStudioPage() {
     }
   }, [workspaceId]);
 
-  // Documents state initialized with default documents to prevent SSR hydration mismatch, then loaded from localStorage
+  // Documents state initialized with default documents to prevent SSR hydration mismatch, then loaded from MongoDB API
   const [documents, setDocuments] = useState<DocumentItem[]>(defaultDocuments);
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('my_cms_mongodb_documents');
-      if (saved) {
-        try {
-          setDocuments(JSON.parse(saved));
-        } catch (e) {
-          console.error('Failed to parse documents from localStorage', e);
+    async function loadDocuments() {
+      try {
+        const res = await fetch('/api/documents');
+        const data = await res.json();
+        if (data.success && data.documents) {
+          if (data.documents.length > 0) {
+            const loaded = data.documents.map((d: any) => ({
+              ...d,
+              _id: d._id.toString ? d._id.toString() : d._id,
+            }));
+            setDocuments(loaded);
+          } else {
+            // Seed default documents into MongoDB
+            for (const doc of defaultDocuments) {
+              await fetch('/api/documents', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ document: doc }),
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load documents from MongoDB API, falling back to localStorage', e);
+        if (typeof window !== 'undefined') {
+          const saved = localStorage.getItem('my_cms_mongodb_documents');
+          if (saved) {
+            try {
+              setDocuments(JSON.parse(saved));
+            } catch (err) {
+              console.error('Failed to parse documents from localStorage', err);
+            }
+          }
         }
       }
     }
+    loadDocuments();
   }, []);
 
-  // Sync documents to localStorage when modified (after client mount)
-  useEffect(() => {
-    if (isClient) {
-      localStorage.setItem('my_cms_mongodb_documents', JSON.stringify(documents));
+  const saveDocumentToApi = async (doc: DocumentItem) => {
+    try {
+      const res = await fetch('/api/documents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ document: doc }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        console.error('Error saving document to MongoDB:', data.error);
+      }
+    } catch (e) {
+      console.error('Network error saving document to MongoDB API:', e);
     }
-  }, [documents, isClient]);
+  };
 
   const [selectedDocument, setSelectedDocument] = useState<DocumentItem | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -240,27 +276,10 @@ export default function WorkspaceStudioPage() {
       setDocuments([newDoc, ...documents]);
       setIsCreating(false);
       setSelectedDocument(newDoc);
-      showToast('Draft created and persisted to storage!');
+      saveDocumentToApi(newDoc);
+      showToast('Draft created and persisted to MongoDB!');
     } else if (selectedDocument) {
-      const updatedDocs = documents.map((doc) =>
-        doc._id === selectedDocument._id
-          ? {
-              ...doc,
-              language: docLanguage,
-              brands: docBrands,
-              workspace: docWorkspace,
-              draft: {
-                ...formData,
-                language: docLanguage,
-                brands: docBrands,
-                workspace: docWorkspace,
-              },
-              _updatedAt: new Date().toISOString(),
-            }
-          : doc
-      );
-      setDocuments(updatedDocs);
-      setSelectedDocument({
+      const updatedDoc: DocumentItem = {
         ...selectedDocument,
         language: docLanguage,
         brands: docBrands,
@@ -271,21 +290,32 @@ export default function WorkspaceStudioPage() {
           brands: docBrands,
           workspace: docWorkspace,
         },
-      });
-      showToast('Draft saved and persisted!');
+        _updatedAt: new Date().toISOString(),
+      };
+      const updatedDocs = documents.map((doc) =>
+        doc._id === selectedDocument._id ? updatedDoc : doc
+      );
+      setDocuments(updatedDocs);
+      setSelectedDocument(updatedDoc);
+      saveDocumentToApi(updatedDoc);
+      showToast('Draft saved and persisted to MongoDB!');
     }
   };
 
   const handlePublish = () => {
     if (!selectedDocument) return;
+    const updatedDoc: DocumentItem = {
+      ...selectedDocument,
+      published: { ...selectedDocument.draft },
+      _updatedAt: new Date().toISOString(),
+    };
     const updatedDocs = documents.map((doc) =>
-      doc._id === selectedDocument._id
-        ? { ...doc, published: { ...doc.draft }, _updatedAt: new Date().toISOString() }
-        : doc
+      doc._id === selectedDocument._id ? updatedDoc : doc
     );
     setDocuments(updatedDocs);
-    setSelectedDocument({ ...selectedDocument, published: { ...selectedDocument.draft } });
-    showToast('Document published live & persisted!');
+    setSelectedDocument(updatedDoc);
+    saveDocumentToApi(updatedDoc);
+    showToast('Document published live & persisted to MongoDB!');
   };
 
   const filteredDocuments = documents.filter((doc) => {
