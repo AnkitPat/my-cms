@@ -9,6 +9,7 @@ let clientPromise: Promise<MongoClient>;
 if (!process.env.MONGODB_URI) {
   console.warn('⚠️ MONGODB_URI environment variable not set. Falling back to default local mongodb://localhost:27017/my_cms');
 }
+console.log(process.env.MONGODB_URI,  'MONGODB_URI')
 
 if (process.env.NODE_ENV === 'development') {
   let globalWithMongo = global as typeof global & {
