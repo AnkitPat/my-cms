@@ -3,6 +3,8 @@ import clientPromise from '@/lib/mongodb';
 
 export async function GET(request: Request) {
   try {
+console.log(process.env.MONGODB_URI,  'MONGODB_URI')
+
     const client = await clientPromise;
     const db = client.db('my_cms');
     const collection = db.collection('documents');
